@@ -1,0 +1,95 @@
+# Import necessary libraries
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+from scipy.signal import find_peaks
+
+# Define constants
+video_file = "test_input.mp4"  # Replace with the path to your video file
+output_file = "output_ppg_signal.csv"
+frame_rate = 0  # Initialize to zero
+green_channel = 1  # Index of the green channel in the frame
+
+# Open the video file to check the frame rate
+cap = cv2.VideoCapture(video_file)
+
+# Check if the video file was successfully opened
+if not cap.isOpened():
+    print("Error: Could not open video file.")
+else:
+    # Get the frame rate of the video
+    frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
+
+    # Release the video capture object
+    cap.release()
+
+# Initialize variables for PPG signal extraction
+ppg_signal = []
+timestamps = []
+
+# Open the video file for processing
+cap = cv2.VideoCapture(video_file)
+
+# Read and process frames
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Calculate PPG value from the entire frame's green channel
+    ppg_value = np.mean(frame[:, :, green_channel])
+    
+    # Get the timestamp of the frame using the retrieved frame rate
+    if frame_rate > 0:
+        timestamp = len(ppg_signal) / frame_rate
+    else:
+        timestamp = 0
+    
+    # Append PPG value and timestamp to the lists
+    ppg_signal.append(ppg_value)
+    timestamps.append(timestamp)
+
+# Preprocess PPG signal using Savitzky-Golay filter
+filtered_ppg_signal = savgol_filter(ppg_signal, window_length=12, polyorder=3)
+
+# Peak detection to find heartbeats
+peaks, _ = find_peaks(filtered_ppg_signal, height=0.2)  # Adjust height threshold as needed
+
+# Calculate heart rate
+heart_rate = len(peaks) / (timestamps[-1] - timestamps[0]) * 60  # in BPM
+
+# Calculate RR intervals (time between successive peaks)
+rr_intervals = np.diff(np.array(timestamps)[peaks])
+
+# Calculate HRV features
+mean_rr = np.mean(rr_intervals)
+std_rr = np.std(rr_intervals)
+rmssd = np.sqrt(np.mean(np.diff(rr_intervals) ** 2))
+pnn50 = sum(np.diff(rr_intervals) > 0.05) / len(rr_intervals) * 100  # PNN50 in percentage
+
+# Visualize the processed PPG signal
+plt.figure(figsize=(12, 6))
+plt.plot(timestamps, ppg_signal, label='Raw PPG Signal', color='red')
+plt.plot(timestamps, filtered_ppg_signal, label='Processed PPG Signal', color='blue')
+plt.plot(np.array(timestamps)[peaks], filtered_ppg_signal[peaks], 'x', label='Detected Peaks', color='green')
+plt.xlabel('Time (s)')
+plt.ylabel('PPG Signal Intensity')
+plt.title(f'Processed PPG Signal (Heart Rate: {heart_rate:.2f} BPM) & rr')
+plt.legend()
+plt.grid(True)
+print(f"Frame Rate: {frame_rate} FPS")
+# Display HRV features
+print(f"Mean RR Interval: {mean_rr:.2f} seconds")
+print(f"Standard Deviation of RR Intervals: {std_rr:.2f} seconds")
+print(f"RMSSD (Root Mean Square of Successive Differences): {rmssd:.2f} seconds")
+print(f"PNN50 (Percentage of Succesive RR Intervals differing more than 50 ms): {pnn50:.2f}%")
+
+# Save the processed PPG signal to a CSV file
+np.savetxt(output_file, np.column_stack((timestamps, filtered_ppg_signal)), delimiter=',', header='Time (s),PPG Signal Intensity', comments='')
+
+# Release the video capture
+cap.release()
+
+# Display the plot
+plt.show()
